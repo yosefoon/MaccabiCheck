@@ -2,5 +2,6 @@
   "doctorName": "ד\"ר וודוביץ דן (עור ומין, תל אביב)",
   "url": "https://serguide.maccabi4u.co.il/heb/doctors/doctorssearchresults/doctorsinfopage/?ItemKeyIndex=EB747D8452028D32CAFC00BED049053AE41DA0E1DE3C064688F4970CC7188557",
   "targetDate": "2026-08-04",
-  "matchMode": "exact"
+  "matchMode": "exact",
+  "checkIntervalSeconds": 30
 }

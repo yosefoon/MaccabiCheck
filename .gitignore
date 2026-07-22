@@ -1,2 +1,9 @@
 .playwright-mcp/
 node_modules/
+
+# מקומי בלבד — לעולם לא לריפו (הריפו ציבורי!)
+.env
+state.local.json
+watch.log
+watch.log.old
+watch.pid

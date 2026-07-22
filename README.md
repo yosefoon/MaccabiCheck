@@ -3,11 +3,19 @@
 כלי קטן שבודק כל ~5 דקות את דף הרופא ד"ר וודוביץ דן (עור ומין, תל אביב) באתר מכבי,
 ושולח התראת טלגרם כשהתאריך של "תור פנוי קרוב" עומד בתנאי שהוגדר.
 
-## איך זה עובד
+## איך זה עובד — שתי שכבות בלתי-תלויות
 
-- `check.mjs` — מושך את דף הרופא, מחלץ את התאריך שליד "תור פנוי קרוב", משווה ליעד ושולח טלגרם.
-- `.github/workflows/check.yml` — מריץ את הבדיקה ב-GitHub Actions כל ~5 דקות.
-- `state.json` — זיכרון בין ריצות (מונע התראות כפולות). מתעדכן בקומיטים אוטומטיים.
+1. **מקומית (מהירה)**: `watch.mjs` רץ ברקע על המחשב, מריץ את `check.mjs` כל 30 שניות. עולה אוטומטית בכניסה ל-Windows דרך Task Scheduler (משימה: `MaccabiCheck Watcher`). עובד רק כשהמחשב דולק.
+2. **ענן (גיבוי איטי)**: `.github/workflows/check.yml` מריץ את אותה בדיקה ב-GitHub Actions (בפועל ~פעם בשעה, לפי מצב הרוח של המתזמן של GitHub). עובד תמיד, גם כשהמחשב כבוי.
+
+אם התור המיוחל יופיע, ייתכן שתגענה שתי התראות — אחת מכל שכבה. עדיף כפול מאשר כלום.
+
+קבצים:
+- `check.mjs` — הבדיקה עצמה: מושך את דף הרופא, מחלץ את התאריך שליד "תור פנוי קרוב", משווה ליעד ושולח טלגרם.
+- `watch.mjs` — הלולאה המקומית. לוג חי: `watch.log`.
+- `run-hidden.vbs` — עטיפה שמריצה את הלולאה בלי חלון.
+- `state.json` (ענן, בקומיטים אוטומטיים) / `state.local.json` (מקומי, לא בגיט) — זיכרון בין ריצות, מונע התראות כפולות.
+- `.env` (מקומי בלבד, לא בגיט!) — סודות הטלגרם לריצות מקומיות.
 - `config.json` — כל ההגדרות.
 
 ## שינוי הגדרות (עריכת `config.json`)
@@ -18,19 +26,33 @@
 | `matchMode` | `"exact"` = התראה רק כשהתאריך המוצג הוא בדיוק תאריך היעד. `"onOrBefore"` = התראה גם על כל תאריך מוקדם יותר |
 | `url` | כתובת דף הרופא (אפשר להחליף לרופא אחר במכבי — אותו מבנה דף) |
 | `doctorName` | שם לתצוגה בהודעות |
+| `checkIntervalSeconds` | תדירות הבדיקה של הלולאה המקומית בשניות (30). לא משפיע על הענן |
 
 אחרי עריכה — commit + push, והריצה הבאה כבר תשתמש בהגדרות החדשות.
 
 ## פקודות שימושיות
 
 ```bash
-node check.mjs                 # בדיקה ידנית מקומית (בלי טלגרם אם אין env)
+node check.mjs                 # בדיקה ידנית מקומית (קורא סודות מ-.env אם קיים)
 TEST_ALERT=1 node check.mjs    # שליחת הודעת בדיקה לטלגרם
 gh workflow run check.yml      # הרצה ידנית בענן
 gh run list --limit 5          # ריצות אחרונות
-gh workflow disable check.yml  # השהיית המעקב
-gh workflow enable check.yml   # חידוש המעקב
+gh workflow disable check.yml  # השהיית שכבת הענן
+gh workflow enable check.yml   # חידוש שכבת הענן
 ```
+
+הקמה מחדש של הלולאה המקומית (מחשב חדש / אחרי מחיקה): ליצור `.env` עם שני הסודות, ואז להריץ פעם אחת את `register-task.ps1` ב-PowerShell.
+
+שליטה בלולאה המקומית (PowerShell):
+
+```powershell
+Get-ScheduledTask 'MaccabiCheck Watcher'        # סטטוס המשימה
+Stop-ScheduledTask 'MaccabiCheck Watcher'       # עצירה (עד הכניסה הבאה ל-Windows)
+Disable-ScheduledTask 'MaccabiCheck Watcher'    # השבתה קבועה
+Enable-ScheduledTask 'MaccabiCheck Watcher'; Start-ScheduledTask 'MaccabiCheck Watcher'  # חידוש
+Get-Content watch.log -Tail 10                  # הצצה בלוג החי
+```
+הערה: `Stop-ScheduledTask` עוצר את המשימה אך תהליך node עשוי להישאר — אם צריך עצירה מיידית מלאה: `Stop-Process -Name node` (יסגור את כל תהליכי node!).
 
 ## מגבלות ידועות
 
