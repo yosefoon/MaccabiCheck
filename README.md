@@ -81,7 +81,10 @@ try {
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$v = ((Invoke-WebRequest 'https://nodejs.org/dist/index.json' -UseBasicParsing).Content | ConvertFrom-Json | Where-Object lts | Select-Object -First 1).version
+# שני שלבים בכוונה: ב-PowerShell 5.1 צינור ישיר מ-ConvertFrom-Json מחזיר null
+$idx = (Invoke-WebRequest 'https://nodejs.org/dist/index.json' -UseBasicParsing).Content | ConvertFrom-Json
+$v = ($idx | Where-Object { $_.lts } | Select-Object -First 1).version
+"Installing Node $v ..."
 Invoke-WebRequest "https://nodejs.org/dist/$v/node-$v-x64.msi" -OutFile "$env:TEMP\node.msi"
 Start-Process msiexec -ArgumentList '/i',"$env:TEMP\node.msi",'/qn' -Wait
 ```
