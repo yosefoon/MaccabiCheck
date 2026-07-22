@@ -85,11 +85,28 @@ try {
 $idx = (Invoke-WebRequest 'https://nodejs.org/dist/index.json' -UseBasicParsing).Content | ConvertFrom-Json
 $v = ($idx | Where-Object { $_.lts } | Select-Object -First 1).version
 "Installing Node $v ..."
-Invoke-WebRequest "https://nodejs.org/dist/$v/node-$v-x64.msi" -OutFile "$env:TEMP\node.msi"
-Start-Process msiexec -ArgumentList '/i',"$env:TEMP\node.msi",'/qn' -Wait
+# WebClient עם ניסיונות חוזרים — Invoke-WebRequest נוטה ליפול באמצע הורדות גדולות
+$msi = "$env:TEMP\node.msi"
+$ok = $false
+foreach ($try in 1..4) {
+  try {
+    (New-Object Net.WebClient).DownloadFile("https://nodejs.org/dist/$v/node-$v-x64.msi", $msi)
+    if ((Get-Item $msi).Length -gt 20MB) { $ok = $true; break }
+  } catch { "Attempt $try failed"; Start-Sleep 5 }
+}
+if ($ok) {
+  Start-Process msiexec -ArgumentList '/i',$msi,'/qn' -Wait
+  & "$env:ProgramFiles\nodejs\node.exe" --version
+} else { "DOWNLOAD FAILED - download the MSI in a browser instead" }
 ```
 
-אחרי ההתקנה **לפתוח חלון PowerShell חדש** (כדי ש-node ייכנס ל-PATH). חלופה בלי התקנה: להוריד `node.exe` בודד מ-`https://nodejs.org/dist/<version>/win-x64/node.exe` לתוך `C:\MaccabiCheck` — סקריפט הרישום ימצא אותו שם.
+אחרי ההתקנה, באותו חלון — לרענן את ה-PATH (או לפתוח חלון PowerShell חדש):
+
+```powershell
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+```
+
+חלופה בלי התקנה: להוריד `node.exe` בודד מ-`https://nodejs.org/dist/<version>/win-x64/node.exe` לתוך `C:\MaccabiCheck` — סקריפט הרישום ימצא אותו שם.
 
 **שלב 2 — הורדת הקוד** (אותו בלוק משמש גם לעדכון גרסה בעתיד; `.env`, ‏state ולוגים שורדים):
 
@@ -102,11 +119,13 @@ Copy-Item "$env:TEMP\mc\MaccabiCheck-main\*" C:\MaccabiCheck\ -Recurse -Force
 Remove-Item "$env:TEMP\mc.zip", "$env:TEMP\mc" -Recurse -Force
 ```
 
-**שלב 3 — סודות**: ‏`notepad C:\MaccabiCheck\.env` ולהדביק שתי שורות (הערכים אצלך, לא בריפו!):
+**שלב 3 — סודות** (הערכים אצלך, לא בריפו! לא דרך Notepad — הוא מוסיף `.txt` בשקט):
 
-```
+```powershell
+@"
 TELEGRAM_BOT_TOKEN=<הטוקן>
 TELEGRAM_CHAT_ID=<המספר>
+"@ | Set-Content -Path 'C:\MaccabiCheck\.env' -Encoding Ascii
 ```
 
 **שלב 4 — אימות ידני לפני רישום**:
