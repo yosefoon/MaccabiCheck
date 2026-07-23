@@ -3,5 +3,6 @@
   "url": "https://serguide.maccabi4u.co.il/heb/doctors/doctorssearchresults/doctorsinfopage/?ItemKeyIndex=EB747D8452028D32CAFC00BED049053AE41DA0E1DE3C064688F4970CC7188557",
   "targetDate": "2026-08-04",
   "matchMode": "exact",
+  "repeatAlertMinutes": 0,
   "checkIntervalSeconds": 30
 }

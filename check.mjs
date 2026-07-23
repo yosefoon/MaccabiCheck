@@ -1,5 +1,5 @@
 // בודק את "תור פנוי קרוב" בדף רופא באתר מכבי ושולח התראת טלגרם כשהתאריך עומד בתנאי שבקונפיג.
-// מיועד לרוץ ב-GitHub Actions (ראו .github/workflows/check.yml) או ידנית: node check.mjs
+// רץ בלולאת watch.mjs (בית + שרת), ידנית (node check.mjs), או ב-GitHub Actions (מושבת כרגע).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +34,6 @@ try {
 }
 state = {
   lastDate: null,
-  alertedDates: [],
   lastAlertedAt: {},
   consecutiveFailures: 0,
   firstFailureAt: null,
@@ -106,30 +105,32 @@ try {
   }
 
   if (qualifies(iso)) {
-    // צינון של שעה לכל תאריך: אם התאריך "מרצד" (תור נתפס ומשוחרר שוב ושוב),
-    // לא מציפים בהתראה כל 30 שניות — לכל היותר אחת לשעה לאותו תאריך
-    const COOLDOWN_MS = 60 * 60 * 1000;
+    // התראה חוזרת כל עוד התנאי מתקיים — אין עצירה אחרי ההתראה הראשונה.
+    // repeatAlertMinutes בקונפיג קובע מרווח מינימלי בין התראות (0 = בכל בדיקה)
+    const repeatMs = (config.repeatAlertMinutes ?? 0) * 60_000;
     const lastAlertAt = Date.parse(state.lastAlertedAt[iso] ?? '') || 0;
-    if (state.alertedDates.includes(iso) || Date.now() - lastAlertAt < COOLDOWN_MS) {
-      console.log('Qualifying date, alert already sent recently — skipping.');
+    if (repeatMs > 0 && Date.now() - lastAlertAt < repeatMs) {
+      console.log('Qualifying date, alert sent recently — spaced by repeatAlertMinutes.');
     } else {
-      const sent = await sendTelegram(
-        `🚨 תור פנוי אצל ${config.doctorName}!\n` +
-          `התאריך הפנוי הקרוב: ${display}\n` +
-          `מהרו לזמן תור:\n${config.url}`
-      );
+      // כשל שליחת טלגרם אינו כשל קריאת דף — נלכד כאן ולא במונה הכשלים; הבדיקה הבאה תנסה שוב
+      let sent = false;
+      try {
+        sent = await sendTelegram(
+          `🚨 תור פנוי אצל ${config.doctorName}!\n` +
+            `התאריך הפנוי הקרוב: ${display}\n` +
+            `מהרו לזמן תור:\n${config.url}`
+        );
+      } catch (telegramErr) {
+        console.error('Telegram send failed: ' + telegramErr.message);
+      }
       if (sent) {
-        state.alertedDates.push(iso);
         state.lastAlertedAt[iso] = now;
         console.log('Alert sent!');
       } else {
-        console.log('Alert NOT sent (missing credentials) — will retry next run.');
+        console.log('Alert NOT sent — will retry next run.');
       }
     }
   } else {
-    // אם התאריך התרחק מהיעד — מאפסים את ההתראות כדי שחזרה אליו תפעיל התראה חדשה
-    // (בכפוף לצינון של שעה דרך lastAlertedAt, שנשמר בכוונה)
-    state.alertedDates = state.alertedDates.filter((d) => d === iso);
     console.log(`No alert: target is ${config.targetDate} (matchMode: ${config.matchMode ?? 'exact'}).`);
   }
   state.lastDate = iso;
