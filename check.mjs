@@ -1,4 +1,4 @@
-// בודק את "תור פנוי קרוב" בדף רופא באתר מכבי ושולח התראת טלגרם כשהתאריך עומד בתנאי שבקונפיג.
+// בודק את "תור פנוי קרוב" בדף רופא באתר מכבי ושולח התראה בטלגרם (ואופציונלית גם בוואטסאפ) כשהתאריך עומד בתנאי שבקונפיג.
 // רץ בלולאת watch.mjs (בית + שרת), ידנית (node check.mjs), או ב-GitHub Actions (מושבת כרגע).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -35,6 +35,7 @@ try {
 state = {
   lastDate: null,
   lastAlertedAt: {},
+  lastWhatsAppAt: {},
   consecutiveFailures: 0,
   firstFailureAt: null,
   failureAlerted: false,
@@ -60,9 +61,29 @@ async function sendTelegram(text) {
   return true;
 }
 
+// ערוץ שני, אופציונלי: וואטסאפ דרך CallMeBot (חינמי לשימוש אישי — שליחה לעצמך בלבד).
+// פעיל רק אם WHATSAPP_PHONE + CALLMEBOT_APIKEY מוגדרים ב-.env; אחרת מדלגים בשקט.
+async function sendWhatsApp(text) {
+  const phone = process.env.WHATSAPP_PHONE;
+  const apikey = process.env.CALLMEBOT_APIKEY;
+  if (!phone || !apikey) return false;
+  const res = await fetch(
+    `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(apikey)}`,
+    { signal: AbortSignal.timeout(20_000) }
+  );
+  // CallMeBot מחזיר 200/201 גם על כישלון, עם ERROR בגוף התשובה — חייבים לבדוק את הגוף
+  const body = (await res.text()).replace(/<[^>]*>/g, '');
+  if (!res.ok || /error/i.test(body)) throw new Error(`CallMeBot ${res.status}: ${body.slice(0, 200)}`);
+  return true;
+}
+
 if (process.env.TEST_ALERT === '1') {
-  const ok = await sendTelegram(`✅ בדיקת מערכת: הכלי למעקב תורים של ${config.doctorName} מחובר ועובד.`);
-  console.log(ok ? 'Test alert sent.' : 'Test alert skipped (no credentials).');
+  const text = `✅ בדיקת מערכת: הכלי למעקב תורים של ${config.doctorName} מחובר ועובד.`;
+  let tg = false;
+  let wa = false;
+  try { tg = await sendTelegram(text); } catch (e) { console.error('Telegram: ' + e.message); }
+  try { wa = await sendWhatsApp(text); } catch (e) { console.error('WhatsApp: ' + e.message); }
+  console.log(`Test alert: telegram=${tg ? 'sent' : 'skipped/failed'}, whatsapp=${wa ? 'sent' : 'skipped/failed'}`);
   process.exit(0);
 }
 
@@ -112,20 +133,37 @@ try {
     if (repeatMs > 0 && Date.now() - lastAlertAt < repeatMs) {
       console.log('Qualifying date, alert sent recently — spaced by repeatAlertMinutes.');
     } else {
-      // כשל שליחת טלגרם אינו כשל קריאת דף — נלכד כאן ולא במונה הכשלים; הבדיקה הבאה תנסה שוב
-      let sent = false;
+      // כשל שליחה אינו כשל קריאת דף — כל ערוץ נלכד בנפרד ולא במונה הכשלים; הבדיקה הבאה תנסה שוב
+      const msg =
+        `🚨 תור פנוי אצל ${config.doctorName}!\n` +
+        `התאריך הפנוי הקרוב: ${display}\n` +
+        `מהרו לזמן תור:\n${config.url}`;
+      let tgSent = false;
+      let waSent = false;
       try {
-        sent = await sendTelegram(
-          `🚨 תור פנוי אצל ${config.doctorName}!\n` +
-            `התאריך הפנוי הקרוב: ${display}\n` +
-            `מהרו לזמן תור:\n${config.url}`
-        );
+        tgSent = await sendTelegram(msg);
       } catch (telegramErr) {
         console.error('Telegram send failed: ' + telegramErr.message);
       }
-      if (sent) {
+      try {
+        // ריווח נפרד לוואטסאפ: ‏CallMeBot חינמי לשימוש אישי — שליחה כל 30 שנ' משתי מכונות
+        // עלולה לגרום לחסימת המפתח. ברירת מחדל: וואטסאפ כל 5 דק', טלגרם ממשיך בכל בדיקה.
+        // כשל שליחה לא מעדכן את החותמת — ולכן ננסה שוב כבר בבדיקה הבאה
+        const waRepeatMs = (config.whatsappRepeatMinutes ?? 5) * 60_000;
+        const lastWaAt = Date.parse(state.lastWhatsAppAt[iso] ?? '') || 0;
+        if (Date.now() - lastWaAt >= waRepeatMs) {
+          waSent = await sendWhatsApp(msg);
+          if (waSent) {
+            state.lastWhatsAppAt[iso] = now;
+            console.log('WhatsApp alert sent!');
+          }
+        }
+      } catch (waErr) {
+        console.error('WhatsApp send failed: ' + waErr.message);
+      }
+      if (tgSent || waSent) {
         state.lastAlertedAt[iso] = now;
-        console.log('Alert sent!');
+        if (tgSent) console.log('Alert sent!');
       } else {
         console.log('Alert NOT sent — will retry next run.');
       }
@@ -142,15 +180,21 @@ try {
   // כדי שניתוק רשת רגעי (למשל התעוררות משינה בלולאה המקומית) לא יזעיק לשווא
   const failingMinutes = (Date.parse(now) - Date.parse(state.firstFailureAt)) / 60000;
   if (state.consecutiveFailures >= 3 && failingMinutes >= 10 && !state.failureAlerted) {
+    const failMsg =
+      `⚠️ הכלי למעקב תורים לא מצליח לקרוא את דף הרופא (${state.consecutiveFailures} כשלים רצופים).\n` +
+      `סיבה אחרונה: ${err.message}\n${config.url}`;
+    let alerted = false;
     try {
-      const sent = await sendTelegram(
-        `⚠️ הכלי למעקב תורים לא מצליח לקרוא את דף הרופא (${state.consecutiveFailures} כשלים רצופים).\n` +
-          `סיבה אחרונה: ${err.message}\n${config.url}`
-      );
-      state.failureAlerted = sent;
+      alerted = await sendTelegram(failMsg);
     } catch (telegramErr) {
-      console.error('Failure alert could not be sent: ' + telegramErr.message);
+      console.error('Failure alert (Telegram) could not be sent: ' + telegramErr.message);
     }
+    try {
+      alerted = (await sendWhatsApp(failMsg)) || alerted;
+    } catch (waErr) {
+      console.error('Failure alert (WhatsApp) could not be sent: ' + waErr.message);
+    }
+    state.failureAlerted = alerted;
   }
   process.exitCode = 1;
 }

@@ -4,5 +4,6 @@
   "targetDate": "2026-08-04",
   "matchMode": "exact",
   "repeatAlertMinutes": 0,
+  "whatsappRepeatMinutes": 5,
   "checkIntervalSeconds": 30
 }
