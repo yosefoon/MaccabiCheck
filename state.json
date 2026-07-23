@@ -2,8 +2,8 @@
   "lastDate": "2026-10-06",
   "alertedDates": [],
   "lastAlertedAt": {},
-  "consecutiveFailures": 0,
-  "firstFailureAt": null,
+  "consecutiveFailures": 1,
+  "firstFailureAt": "2026-07-23T06:20:13.616Z",
   "failureAlerted": false,
-  "lastCheck": "2026-07-23T00:15:06.811Z"
+  "lastCheck": "2026-07-23T06:20:13.616Z"
 }
