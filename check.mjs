@@ -1,4 +1,4 @@
-// בודק את "תור פנוי קרוב" בדף רופא באתר מכבי ושולח התראה בטלגרם (ואופציונלית גם בוואטסאפ) כשהתאריך עומד בתנאי שבקונפיג.
+// בודק את "תור פנוי קרוב" בדף רופא באתר מכבי ושולח התראה בטלגרם (ואופציונלית גם בוואטסאפ ושיחה קולית) כשהתאריך עומד בתנאי שבקונפיג.
 // רץ בלולאת watch.mjs (בית + שרת), ידנית (node check.mjs), או ב-GitHub Actions (מושבת כרגע).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -36,6 +36,7 @@ state = {
   lastDate: null,
   lastAlertedAt: {},
   lastWhatsAppAt: {},
+  lastCallAt: {},
   consecutiveFailures: 0,
   firstFailureAt: null,
   failureAlerted: false,
@@ -75,6 +76,37 @@ async function sendWhatsApp(text) {
   const body = (await res.text()).replace(/<[^>]*>/g, '');
   if (!res.ok || /error/i.test(body)) throw new Error(`CallMeBot ${res.status}: ${body.slice(0, 200)}`);
   return true;
+}
+
+// ערוץ שלישי, אופציונלי: שיחה קולית בטלגרם דרך CallMeBot — הטלפון מצלצל כמו שיחה נכנסת
+// ומוקרא טקסט. פעיל רק אם TELEGRAM_CALL_USER מוגדר ב-.env (למשל @username), אחרת מדלגים.
+// דורש הרשאה חד-פעמית: המשתמש שולח /start ל-@CallMeBot_txtbot בטלגרם.
+async function sendTelegramCall(text) {
+  const user = process.env.TELEGRAM_CALL_USER;
+  if (!user) return false;
+  const res = await fetch(
+    `https://api.callmebot.com/start.php?user=${encodeURIComponent(user)}&text=${encodeURIComponent(text)}&lang=he-IL-Standard-A&rpt=2`,
+    { signal: AbortSignal.timeout(30_000) }
+  );
+  // הצלחה מזוהה לפי הסמן החיובי בגוף התשובה; כישלון (למשל אין הרשאה) מוחזר גם הוא כ-200
+  let body = (await res.text()).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const at = body.indexOf('Checking'); // חיתוך זבל האנליטיקס שלפני החלק האינפורמטיבי
+  if (at > 0) body = body.slice(at);
+  if (!res.ok || !/Starting Telegram/i.test(body)) {
+    throw new Error(`CallMeBot call ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return true;
+}
+
+if (process.env.TEST_CALL === '1') {
+  try {
+    const ok = await sendTelegramCall('בדיקת מערכת: ערוץ השיחות של כלי מעקב התורים עובד.');
+    console.log(ok ? 'Test call started.' : 'Test call skipped (TELEGRAM_CALL_USER not set).');
+  } catch (e) {
+    console.error('Test call failed: ' + e.message);
+    process.exitCode = 1;
+  }
+  process.exit();
 }
 
 if (process.env.TEST_ALERT === '1') {
@@ -160,6 +192,23 @@ try {
         }
       } catch (waErr) {
         console.error('WhatsApp send failed: ' + waErr.message);
+      }
+      try {
+        // שיחה מצלצלת: לא בכל בדיקה — שיחה אורכת עד ~30 שנ' ושיחה חדשה באמצע צלצול
+        // מתנגשת בקודמת, לכן מרווח (ברירת מחדל 3 דק'). ההודעות ממשיכות בכל בדיקה.
+        const callRepeatMs = (config.callRepeatMinutes ?? 3) * 60_000;
+        const lastCallAt = Date.parse(state.lastCallAt[iso] ?? '') || 0;
+        if (Date.now() - lastCallAt >= callRepeatMs) {
+          const called = await sendTelegramCall(
+            `תור פנוי אצל ${config.doctorName} בתאריך המבוקש ${display}. בדוק את ההודעות וקבע תור עכשיו.`
+          );
+          if (called) {
+            state.lastCallAt[iso] = now;
+            console.log('Telegram call started!');
+          }
+        }
+      } catch (callErr) {
+        console.error('Telegram call failed: ' + callErr.message);
       }
       if (tgSent || waSent) {
         state.lastAlertedAt[iso] = now;

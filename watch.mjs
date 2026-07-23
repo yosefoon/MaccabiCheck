@@ -62,12 +62,13 @@ log(`watcher started (pid ${process.pid}, interval ${intervalSec}s)`);
 function runOnce() {
   return new Promise((resolve) => {
     let out = '';
-    // timeout כרשת ביטחון אחרונה: ל-check.mjs יש timeouts משלו על הבקשות (20/15 שנ'),
-    // אז 90 שנ' נחצה רק אם משהו אחר נתקע לגמרי
+    // timeout כרשת ביטחון אחרונה: ל-check.mjs יש timeouts משלו על כל בקשה (דף 20,
+    // טלגרם 15, וואטסאפ 20, שיחה 30 שנ' — במקרה הגרוע ~85 שנ' ברצף), אז 150 שנ'
+    // נחצה רק אם משהו אחר נתקע לגמרי
     const child = spawn(process.execPath, [join(root, 'check.mjs')], {
       cwd: root,
       env: { ...process.env, STATE_FILE: 'state.local.json' },
-      timeout: 90_000,
+      timeout: 150_000,
       killSignal: 'SIGKILL',
     });
     child.stdout.on('data', (d) => (out += d));
